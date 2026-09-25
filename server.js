@@ -6,28 +6,27 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Parse JSON data from the ESP8266
-app.use(express.json()); 
+// Middleware to parse incoming JSON from the ESP32
+app.use(express.json());
 
-// Serve the frontend webpage from a folder named 'public'
-app.use(express.static('public')); 
+// Serve the frontend files from the "public" folder
+app.use(express.static('public'));
 
-// Endpoint to receive data from ESP8266
+// Endpoint for the ESP32 to POST data to
 app.post('/api/update', (req, res) => {
-    const temp = req.body.temperature;
+    const data = req.body;
     
-    if (temp !== undefined) {
-        console.log(`Received temperature: ${temp}°C`);
-        // Broadcast the live temperature to any open web browsers
-        io.emit('new_temperature', temp);
-        res.status(200).send("OK");
+    // Broadcast the exact data directly to the web dashboard
+    if (data && data.temperatures) {
+        io.emit('updateData', data);
+        res.status(200).send('Data received and broadcasted');
     } else {
-        res.status(400).send("Bad Request: Missing temperature data");
+        res.status(400).send('Invalid data format');
     }
 });
 
-// Start the server
+// Start the server (Render provides the PORT automatically)
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Cloud server running on port ${PORT}`);
+    console.log(`Cloud Server running on port ${PORT}`);
 });
