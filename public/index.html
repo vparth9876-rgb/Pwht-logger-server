@@ -16,7 +16,7 @@
         .controls-bar { 
             margin-bottom: 20px; padding: 15px; background: white; 
             border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
-            display: flex; flex-wrap: wrap; align-items: center; gap: 15px;
+            display: flex; gap: 15px; align-items: center;
         }
         button { padding: 8px 12px; border: none; border-radius: 4px; cursor: pointer; color: white; font-weight: bold; }
         .btn-start { background: #28a745; }
@@ -24,9 +24,6 @@
         .btn-add { background: #6c757d; }
         .btn-csv { background: #007bff; }
         .btn-pdf { background: #17a2b8; }
-        
-        .input-group { display: flex; align-items: center; font-weight: bold; font-size: 14px;}
-        .input-group input { margin-left: 8px; padding: 5px; border: 1px solid #ccc; border-radius: 4px; }
         
         /* Individual Graph Layout */
         .graph-card {
@@ -36,11 +33,13 @@
         }
         .graph-toolbar {
             background: #e9ecef; padding: 10px 15px;
-            display: flex; justify-content: flex-end; gap: 10px;
+            display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
             border-bottom: 1px solid #ccc;
         }
+        .toolbar-group { display: flex; align-items: center; gap: 15px; }
+        .toolbar-group label { font-size: 13px; font-weight: bold; }
+        .toolbar-group input { padding: 4px; border: 1px solid #ccc; border-radius: 3px; width: 50px; margin-left: 5px; }
         .btn-sm { padding: 5px 10px; font-size: 12px; }
-        .btn-download-img { background: #198754; }
         .btn-delete { background: #dc3545; }
         
         .scroll-wrapper {
@@ -53,46 +52,31 @@
 </head>
 <body>
 
+    <!-- Main Top Controls (Only Global Actions) -->
     <div class="controls-bar">
         <button id="loggingBtn" class="btn-start" onclick="toggleLogging()">Start Logging</button>
-        <button class="btn-erase" onclick="eraseData()">Erase Data</button>
-        
-        <div class="input-group">
-            <label for="timeRes">Time Res (min):</label>
-            <input type="number" id="timeRes" value="3" min="0.1" step="0.1" style="width: 60px;" onchange="updateSettings()">
-        </div>
-        
-        <div class="input-group">
-            <label for="tempRes">Temp Res (°C):</label>
-            <input type="number" id="tempRes" value="1" min="0.1" step="0.1" style="width: 60px;" onchange="updateSettings()">
-        </div>
-        
-        <button class="btn-add" onclick="addGraph()">+ Add Graph</button>
-        <button class="btn-csv" onclick="downloadCSV()">Download CSV</button>
-        <button class="btn-pdf" onclick="downloadPDF()">Download PDF Report</button>
+        <button class="btn-erase" onclick="eraseData()">Erase All Data</button>
+        <button class="btn-add" onclick="addGraph()">+ Add New Graph Batch</button>
     </div>
 
-    <!-- Multiple graphs are injected here -->
+    <!-- Multiple independent graphs are injected here -->
     <div id="graphsContainer"></div>
 
     <script>
         // --- Global Variables ---
         const socket = io();
         let isLogging = false;
-        let fullCsvData = [];
-        let lastLoggedTimestamp = 0;
-        let loggingIntervalMs = 3 * 60 * 1000; 
         const numSensors = 24;
-        const charts = []; // Array to hold active charts
+        const charts = []; // Array holds active charts and their INDEPENDENT data arrays
         let graphCounter = 0; // Unique ID generator
 
         const colors = ['#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', '#9A6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#a9a9a9', '#000000', '#ff0000', '#00ff00', '#0000ff'];
 
         window.onload = function() {
-            addGraph();
+            addGraph(); // Create the first graph automatically
         };
 
-        // --- Core UI & Settings ---
+        // --- Core UI Actions ---
         function toggleLogging() {
             isLogging = !isLogging;
             let btn = document.getElementById('loggingBtn');
@@ -101,21 +85,11 @@
             btn.style.color = isLogging ? "#000" : "#fff";
         }
 
-        function updateSettings() {
-            let mins = parseFloat(document.getElementById("timeRes").value) || 3;
-            loggingIntervalMs = mins * 60 * 1000;
-
-            let tempStep = parseFloat(document.getElementById("tempRes").value) || 1;
-            charts.forEach(c => {
-                c.chart.options.scales.y.ticks.stepSize = tempStep;
-                c.chart.update();
-            });
-        }
-
         function eraseData() {
-            if(confirm("Clear all graph data?")) {
-                fullCsvData = [];
+            if(confirm("Clear all data for all graphs?")) {
                 charts.forEach(c => {
+                    c.graphCsvData = [];
+                    c.lastLoggedTimestamp = 0;
                     c.chart.data.labels = [];
                     c.chart.data.datasets.forEach(ds => ds.data = []);
                     c.chart.update();
@@ -131,7 +105,6 @@
             let canvasId = 'canvas_' + currentId;
             let containerId = 'container_' + currentId;
             
-            // Build Graph Card (Wrapper)
             let card = document.createElement('div');
             card.className = "graph-card";
             card.id = cardId;
@@ -140,138 +113,153 @@
             let toolbar = document.createElement('div');
             toolbar.className = "graph-toolbar";
             
-            let dlBtn = document.createElement('button');
-            dlBtn.className = "btn-download-img btn-sm";
-            dlBtn.innerText = "Download Image";
-            dlBtn.onclick = function() { downloadSpecificImage(canvasId); };
+            // Left Side: Settings
+            let leftGroup = document.createElement('div');
+            leftGroup.className = "toolbar-group";
+            
+            let timeLabel = document.createElement('label');
+            timeLabel.innerHTML = 'Time Res (min): <input type="number" value="3" min="0.1" step="0.1" onchange="updateChartInterval('+currentId+', this.value)">';
+            
+            let tempLabel = document.createElement('label');
+            tempLabel.innerHTML = 'Temp Res (°C): <input type="number" value="1" min="0.1" step="0.1" onchange="updateChartScale('+currentId+', this.value)">';
+            
+            leftGroup.appendChild(timeLabel);
+            leftGroup.appendChild(tempLabel);
+            
+            // Right Side: Export Buttons
+            let rightGroup = document.createElement('div');
+            rightGroup.className = "toolbar-group";
+            
+            let csvBtn = document.createElement('button');
+            csvBtn.className = "btn-csv btn-sm"; csvBtn.innerText = "Download CSV";
+            csvBtn.onclick = function() { downloadCSV(currentId); };
+            
+            let pdfBtn = document.createElement('button');
+            pdfBtn.className = "btn-pdf btn-sm"; pdfBtn.innerText = "Download PDF";
+            pdfBtn.onclick = function() { downloadPDF(currentId); };
             
             let delBtn = document.createElement('button');
-            delBtn.className = "btn-delete btn-sm";
-            delBtn.innerText = "Delete Graph";
-            delBtn.onclick = function() { deleteGraph(cardId, containerId); };
+            delBtn.className = "btn-delete btn-sm"; delBtn.innerText = "Delete Graph";
+            delBtn.onclick = function() { deleteGraph(currentId); };
             
-            toolbar.appendChild(dlBtn);
-            toolbar.appendChild(delBtn);
+            rightGroup.appendChild(csvBtn);
+            rightGroup.appendChild(pdfBtn);
+            rightGroup.appendChild(delBtn);
             
-            // Build Scroll Area & Canvas
+            toolbar.appendChild(leftGroup);
+            toolbar.appendChild(rightGroup);
+            
+            // Build Canvas Area
             let scrollArea = document.createElement('div');
             scrollArea.className = "scroll-wrapper";
-            
             let container = document.createElement('div');
-            container.className = "canvas-container";
-            container.id = containerId;
+            container.className = "canvas-container"; container.id = containerId;
+            let canvas = document.createElement('canvas'); canvas.id = canvasId;
             
-            let canvas = document.createElement('canvas');
-            canvas.id = canvasId;
-            
-            // Assemble DOM
             container.appendChild(canvas);
             scrollArea.appendChild(container);
             card.appendChild(toolbar);
             card.appendChild(scrollArea);
             document.getElementById('graphsContainer').appendChild(card);
             
-            // Setup Chart.js for this canvas
+            // Setup Independent Chart.js Instance
             let chartDatasets = [];
             for (let i = 0; i < numSensors; i++) {
                 chartDatasets.push({
                     label: `TC ${i + 1}`,
-                    data: fullCsvData.map(row => row.temps[i]),
+                    data: [], // Starts empty for independent batch tracking
                     borderColor: colors[i % colors.length],
-                    borderWidth: 2,
-                    fill: false,
-                    tension: 0.1,
-                    spanGaps: true
+                    borderWidth: 2, fill: false, tension: 0.1, spanGaps: true
                 });
             }
             
-            let labels = fullCsvData.map(row => row.time);
-            let tempStep = parseFloat(document.getElementById('tempRes').value) || 1;
             let ctx = document.getElementById(canvasId).getContext('2d');
-
             let newChart = new Chart(ctx, {
                 type: 'line',
-                data: { labels: labels, datasets: chartDatasets },
+                data: { labels: [], datasets: chartDatasets },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    animation: false,
+                    responsive: true, maintainAspectRatio: false, animation: false,
                     scales: {
-                        y: { title: { display: true, text: 'Temperature (°C)' }, ticks: { stepSize: tempStep } },
+                        y: { title: { display: true, text: 'Temperature (°C)' }, ticks: { stepSize: 1 } },
                         x: { title: { display: true, text: 'Time' } }
                     },
                     plugins: { legend: { position: 'top' } }
                 }
             });
             
-            charts.push({ chart: newChart, cardId: cardId, containerId: containerId, canvasId: canvasId });
-            
-            // Resize if data is already large
-            let requiredWidth = fullCsvData.length * 40; 
-            if (requiredWidth > container.clientWidth) {
-                container.style.width = requiredWidth + "px";
+            // Push object to active charts array with its own independent logging variables
+            charts.push({ 
+                id: currentId, chart: newChart, cardId: cardId, containerId: containerId, canvasId: canvasId,
+                graphCsvData: [], // Stores data specifically for this graph
+                lastLoggedTimestamp: 0,
+                loggingIntervalMs: 3 * 60 * 1000 // Defaults to 3 mins
+            });
+        }
+
+        // --- Individual Graph Settings Updaters ---
+        function updateChartInterval(id, minutes) {
+            let targetChart = charts.find(c => c.id === id);
+            if (targetChart) targetChart.loggingIntervalMs = (parseFloat(minutes) || 3) * 60 * 1000;
+        }
+
+        function updateChartScale(id, scale) {
+            let targetChart = charts.find(c => c.id === id);
+            if (targetChart) {
+                targetChart.chart.options.scales.y.ticks.stepSize = (parseFloat(scale) || 1);
+                targetChart.chart.update();
             }
         }
 
-        function deleteGraph(cardId, containerId) {
-            // Find and destroy the Chart.js instance to free memory
-            let index = charts.findIndex(c => c.containerId === containerId);
+        function deleteGraph(id) {
+            if (charts.length <= 1) return alert("You cannot delete the only remaining graph.");
+            
+            let index = charts.findIndex(c => c.id === id);
             if (index > -1) {
                 charts[index].chart.destroy();
+                document.getElementById(charts[index].cardId).remove();
                 charts.splice(index, 1);
             }
-            // Remove HTML element
-            document.getElementById(cardId).remove();
         }
 
-        function downloadSpecificImage(canvasId) {
-            let canvas = document.getElementById(canvasId);
-            if (!canvas) return;
-            
-            // Capture the full scrolling width of the specific canvas
-            let imgUrl = canvas.toDataURL('image/png', 1.0);
-            let link = document.createElement("a");
-            link.href = imgUrl;
-            link.download = `PWHT_Graph_${new Date().getTime()}.png`;
-            link.click();
-        }
-
-        // --- Data Reception ---
+        // --- Data Reception (Independent Processing per Graph) ---
         socket.on('updateData', function(data) {
             if (!isLogging) return;
             let currentTime = Date.now();
+            let now = new Date();
+            let timeString = now.toLocaleTimeString();
+            let dateString = now.toLocaleDateString();
             
-            if (currentTime - lastLoggedTimestamp >= loggingIntervalMs) {
-                let now = new Date();
-                let timeString = now.toLocaleTimeString();
-                let dateString = now.toLocaleDateString();
-
-                fullCsvData.push({ date: dateString, time: timeString, temps: data.temperatures });
-                let requiredWidth = fullCsvData.length * 40; 
-
-                charts.forEach(c => {
+            // Loop through each active graph and check its specific interval requirement
+            charts.forEach(c => {
+                if (currentTime - c.lastLoggedTimestamp >= c.loggingIntervalMs) {
+                    
+                    c.graphCsvData.push({ date: dateString, time: timeString, temps: data.temperatures });
                     c.chart.data.labels.push(timeString);
+                    
                     for (let i = 0; i < numSensors; i++) {
                         c.chart.data.datasets[i].data.push(data.temperatures[i]);
                     }
+                    
+                    let requiredWidth = c.graphCsvData.length * 40; 
                     let container = document.getElementById(c.containerId);
                     if (requiredWidth > container.clientWidth) container.style.width = requiredWidth + "px";
+                    
                     c.chart.update();
-                });
-
-                lastLoggedTimestamp = currentTime;
-            }
+                    c.lastLoggedTimestamp = currentTime; // Reset independent timer
+                }
+            });
         });
 
-        // --- Export Data ---
-        function downloadCSV() {
-            if (fullCsvData.length === 0) return alert("No data available to export.");
+        // --- Export Independent Graph Data ---
+        function downloadCSV(id) {
+            let targetChart = charts.find(c => c.id === id);
+            if (!targetChart || targetChart.graphCsvData.length === 0) return alert("No data available to export for this graph.");
             
             let csvContent = "data:text/csv;charset=utf-8,Date,Time,";
             for(let i = 0; i < numSensors; i++) csvContent += `TC ${i+1},`;
             csvContent += "\r\n";
             
-            fullCsvData.forEach(row => {
+            targetChart.graphCsvData.forEach(row => {
                 let rowArray = [row.date, row.time];
                 for (let i = 0; i < numSensors; i++) {
                      rowArray.push((row.temps[i] !== null && row.temps[i] !== undefined) ? row.temps[i] : "");
@@ -281,23 +269,20 @@
             
             var link = document.createElement("a");
             link.setAttribute("href", encodeURI(csvContent));
-            link.setAttribute("download", "PWHT_Data_Log.csv");
+            link.setAttribute("download", `PWHT_Data_Log_Graph_${id}.csv`);
             document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            link.click(); document.body.removeChild(link);
         }
 
-        function downloadPDF() {
-            if (fullCsvData.length === 0) return alert("No data available to generate a report.");
-            if (charts.length === 0) return alert("Please add at least one graph to generate the PDF.");
-
+        function downloadPDF(id) {
+            let targetChart = charts.find(c => c.id === id);
+            if (!targetChart || targetChart.graphCsvData.length === 0) return alert("No data available to generate a report.");
+            
+            var mainCanvas = document.getElementById(targetChart.canvasId);
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
 
             const pdfMarginX = 14; const pdfMaxGraphWidth = 269; const pdfGraphHeight = 115;
-            
-            // Intelligently grabs the first available active canvas in the array
-            var mainCanvas = document.getElementById(charts[0].canvasId); 
             var scale = pdfGraphHeight / mainCanvas.height;
             var totalPdfWidthNeeded = mainCanvas.width * scale;
             var totalPages = Math.ceil(totalPdfWidthNeeded / pdfMaxGraphWidth);
@@ -331,7 +316,7 @@
             var tableHeaders = ["Date", "Time"];
             for (let i = 0; i < numSensors; i++) tableHeaders.push("TC " + (i + 1));
 
-            var tableBody = fullCsvData.map(function(row) {
+            var tableBody = targetChart.graphCsvData.map(function(row) {
                 var rowData = [row.date, row.time];
                 for (let i = 0; i < numSensors; i++) {
                     rowData.push((row.temps[i] !== null && row.temps[i] !== undefined) ? parseFloat(row.temps[i]).toFixed(1) : "--");
@@ -351,7 +336,7 @@
                 }
             });
 
-            doc.save("PWHT_Full_Cycle_Report.pdf");
+            doc.save(`PWHT_Report_Graph_${id}.pdf`);
         }
     </script>
 </body>
