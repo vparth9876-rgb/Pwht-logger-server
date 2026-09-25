@@ -318,3 +318,27 @@
   </script>
 </body>
 </html>
+<script src="/socket.io/socket.io.js"></script>
+<!-- jsPDF and AutoTable for Reports -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+<style>
+  .scroll-wrapper {
+      width: 100%;
+      overflow-x: auto; 
+      overflow-y: hidden;
+      border: 1px solid #ccc;
+      background: #f8f9fa;
+      margin-top: 20px;
+  }
+  .canvas-container {
+      height: 400px; 
+      width: 100%; 
+      min-width: 800px; 
+  }
+  .controls-bar {
+      margin-top: 15px;
+      margin-bottom: 15px;
+  }
+</style>
