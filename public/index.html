@@ -28,11 +28,23 @@
         .input-group { display: flex; align-items: center; font-weight: bold; font-size: 14px;}
         .input-group input { margin-left: 8px; padding: 5px; border: 1px solid #ccc; border-radius: 4px; }
         
-        /* The Scrollbox for wide graphs */
+        /* Individual Graph Layout */
+        .graph-card {
+            background: white; border: 1px solid #ccc; 
+            border-radius: 8px; margin-bottom: 20px; overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .graph-toolbar {
+            background: #e9ecef; padding: 10px 15px;
+            display: flex; justify-content: flex-end; gap: 10px;
+            border-bottom: 1px solid #ccc;
+        }
+        .btn-sm { padding: 5px 10px; font-size: 12px; }
+        .btn-download-img { background: #198754; }
+        .btn-delete { background: #dc3545; }
+        
         .scroll-wrapper {
             width: 100%; overflow-x: auto; overflow-y: hidden;
-            border: 1px solid #ccc; background: white;
-            border-radius: 8px; margin-bottom: 20px;
         }
         .canvas-container {
             height: 450px; width: 100%; min-width: 1000px;
@@ -45,7 +57,6 @@
         <button id="loggingBtn" class="btn-start" onclick="toggleLogging()">Start Logging</button>
         <button class="btn-erase" onclick="eraseData()">Erase Data</button>
         
-        <!-- Manual Resolution Inputs -->
         <div class="input-group">
             <label for="timeRes">Time Res (min):</label>
             <input type="number" id="timeRes" value="3" min="0.1" step="0.1" style="width: 60px;" onchange="updateSettings()">
@@ -56,13 +67,12 @@
             <input type="number" id="tempRes" value="1" min="0.1" step="0.1" style="width: 60px;" onchange="updateSettings()">
         </div>
         
-        <!-- Graph & Export Buttons -->
         <button class="btn-add" onclick="addGraph()">+ Add Graph</button>
         <button class="btn-csv" onclick="downloadCSV()">Download CSV</button>
         <button class="btn-pdf" onclick="downloadPDF()">Download PDF Report</button>
     </div>
 
-    <!-- Multiple graphs will be injected into this container -->
+    <!-- Multiple graphs are injected here -->
     <div id="graphsContainer"></div>
 
     <script>
@@ -73,16 +83,16 @@
         let lastLoggedTimestamp = 0;
         let loggingIntervalMs = 3 * 60 * 1000; 
         const numSensors = 24;
-        const charts = []; // Array to hold multiple chart instances
+        const charts = []; // Array to hold active charts
+        let graphCounter = 0; // Unique ID generator
 
         const colors = ['#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', '#9A6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#a9a9a9', '#000000', '#ff0000', '#00ff00', '#0000ff'];
 
-        // Automatically create the first graph when the page loads
         window.onload = function() {
             addGraph();
         };
 
-        // --- Core UI & Settings Logic ---
+        // --- Core UI & Settings ---
         function toggleLogging() {
             isLogging = !isLogging;
             let btn = document.getElementById('loggingBtn');
@@ -92,11 +102,9 @@
         }
 
         function updateSettings() {
-            // Update Time Logging Interval
             let mins = parseFloat(document.getElementById("timeRes").value) || 3;
             loggingIntervalMs = mins * 60 * 1000;
 
-            // Update Y-Axis Temperature Step Resolution across ALL active graphs
             let tempStep = parseFloat(document.getElementById("tempRes").value) || 1;
             charts.forEach(c => {
                 c.chart.options.scales.y.ticks.stepSize = tempStep;
@@ -116,15 +124,38 @@
             }
         }
 
-        // --- Multiple Graph Generation Logic ---
+        // --- Per-Graph Generation & Deletion ---
         function addGraph() {
-            let graphIndex = charts.length;
-            let canvasId = 'canvas_' + graphIndex;
-            let containerId = 'container_' + graphIndex;
+            let currentId = graphCounter++;
+            let cardId = 'card_' + currentId;
+            let canvasId = 'canvas_' + currentId;
+            let containerId = 'container_' + currentId;
             
-            // Build the DOM elements
-            let wrapper = document.createElement('div');
-            wrapper.className = "scroll-wrapper";
+            // Build Graph Card (Wrapper)
+            let card = document.createElement('div');
+            card.className = "graph-card";
+            card.id = cardId;
+            
+            // Build Toolbar for this specific graph
+            let toolbar = document.createElement('div');
+            toolbar.className = "graph-toolbar";
+            
+            let dlBtn = document.createElement('button');
+            dlBtn.className = "btn-download-img btn-sm";
+            dlBtn.innerText = "Download Image";
+            dlBtn.onclick = function() { downloadSpecificImage(canvasId); };
+            
+            let delBtn = document.createElement('button');
+            delBtn.className = "btn-delete btn-sm";
+            delBtn.innerText = "Delete Graph";
+            delBtn.onclick = function() { deleteGraph(cardId, containerId); };
+            
+            toolbar.appendChild(dlBtn);
+            toolbar.appendChild(delBtn);
+            
+            // Build Scroll Area & Canvas
+            let scrollArea = document.createElement('div');
+            scrollArea.className = "scroll-wrapper";
             
             let container = document.createElement('div');
             container.className = "canvas-container";
@@ -133,11 +164,14 @@
             let canvas = document.createElement('canvas');
             canvas.id = canvasId;
             
+            // Assemble DOM
             container.appendChild(canvas);
-            wrapper.appendChild(container);
-            document.getElementById('graphsContainer').appendChild(wrapper);
+            scrollArea.appendChild(container);
+            card.appendChild(toolbar);
+            card.appendChild(scrollArea);
+            document.getElementById('graphsContainer').appendChild(card);
             
-            // Sync historical data to new chart
+            // Setup Chart.js for this canvas
             let chartDatasets = [];
             for (let i = 0; i < numSensors; i++) {
                 chartDatasets.push({
@@ -163,28 +197,48 @@
                     maintainAspectRatio: false,
                     animation: false,
                     scales: {
-                        y: { 
-                            title: { display: true, text: 'Temperature (°C)' },
-                            ticks: { stepSize: tempStep }
-                        },
+                        y: { title: { display: true, text: 'Temperature (°C)' }, ticks: { stepSize: tempStep } },
                         x: { title: { display: true, text: 'Time' } }
-                    }
+                    },
+                    plugins: { legend: { position: 'top' } }
                 }
             });
             
-            charts.push({ chart: newChart, containerId: containerId });
+            charts.push({ chart: newChart, cardId: cardId, containerId: containerId, canvasId: canvasId });
             
-            // Immediately resize if historical data is long
+            // Resize if data is already large
             let requiredWidth = fullCsvData.length * 40; 
             if (requiredWidth > container.clientWidth) {
                 container.style.width = requiredWidth + "px";
             }
         }
 
+        function deleteGraph(cardId, containerId) {
+            // Find and destroy the Chart.js instance to free memory
+            let index = charts.findIndex(c => c.containerId === containerId);
+            if (index > -1) {
+                charts[index].chart.destroy();
+                charts.splice(index, 1);
+            }
+            // Remove HTML element
+            document.getElementById(cardId).remove();
+        }
+
+        function downloadSpecificImage(canvasId) {
+            let canvas = document.getElementById(canvasId);
+            if (!canvas) return;
+            
+            // Capture the full scrolling width of the specific canvas
+            let imgUrl = canvas.toDataURL('image/png', 1.0);
+            let link = document.createElement("a");
+            link.href = imgUrl;
+            link.download = `PWHT_Graph_${new Date().getTime()}.png`;
+            link.click();
+        }
+
         // --- Data Reception ---
         socket.on('updateData', function(data) {
             if (!isLogging) return;
-
             let currentTime = Date.now();
             
             if (currentTime - lastLoggedTimestamp >= loggingIntervalMs) {
@@ -195,17 +249,13 @@
                 fullCsvData.push({ date: dateString, time: timeString, temps: data.temperatures });
                 let requiredWidth = fullCsvData.length * 40; 
 
-                // Update ALL graphs simultaneously
                 charts.forEach(c => {
                     c.chart.data.labels.push(timeString);
                     for (let i = 0; i < numSensors; i++) {
                         c.chart.data.datasets[i].data.push(data.temperatures[i]);
                     }
-                    
                     let container = document.getElementById(c.containerId);
-                    if (requiredWidth > container.clientWidth) {
-                        container.style.width = requiredWidth + "px";
-                    }
+                    if (requiredWidth > container.clientWidth) container.style.width = requiredWidth + "px";
                     c.chart.update();
                 });
 
@@ -213,53 +263,41 @@
             }
         });
 
-        // --- Export CSV Logic ---
+        // --- Export Data ---
         function downloadCSV() {
-            if (fullCsvData.length === 0) {
-                alert("No data available to export.");
-                return;
-            }
+            if (fullCsvData.length === 0) return alert("No data available to export.");
             
-            let csvContent = "data:text/csv;charset=utf-8,";
-            
-            let headers = ["Date", "Time"];
-            for(let i = 0; i < numSensors; i++) headers.push(`TC ${i+1}`);
-            csvContent += headers.join(",") + "\r\n";
+            let csvContent = "data:text/csv;charset=utf-8,Date,Time,";
+            for(let i = 0; i < numSensors; i++) csvContent += `TC ${i+1},`;
+            csvContent += "\r\n";
             
             fullCsvData.forEach(row => {
                 let rowArray = [row.date, row.time];
                 for (let i = 0; i < numSensors; i++) {
-                     let val = (row.temps[i] !== null && row.temps[i] !== undefined) ? row.temps[i] : "";
-                     rowArray.push(val);
+                     rowArray.push((row.temps[i] !== null && row.temps[i] !== undefined) ? row.temps[i] : "");
                 }
                 csvContent += rowArray.join(",") + "\r\n";
             });
             
-            var encodedUri = encodeURI(csvContent);
             var link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
+            link.setAttribute("href", encodeURI(csvContent));
             link.setAttribute("download", "PWHT_Data_Log.csv");
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
         }
 
-        // --- Multi-Page PDF Generation ---
         function downloadPDF() {
-            if (fullCsvData.length === 0) {
-                alert("No data available to generate a report.");
-                return;
-            }
+            if (fullCsvData.length === 0) return alert("No data available to generate a report.");
+            if (charts.length === 0) return alert("Please add at least one graph to generate the PDF.");
 
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
 
-            const pdfMarginX = 14;
-            const pdfMaxGraphWidth = 269; 
-            const pdfGraphHeight = 115;
+            const pdfMarginX = 14; const pdfMaxGraphWidth = 269; const pdfGraphHeight = 115;
             
-            // Grabs the FIRST graph on the page to put in the PDF report
-            var mainCanvas = document.getElementsByTagName('canvas')[0]; 
+            // Intelligently grabs the first available active canvas in the array
+            var mainCanvas = document.getElementById(charts[0].canvasId); 
             var scale = pdfGraphHeight / mainCanvas.height;
             var totalPdfWidthNeeded = mainCanvas.width * scale;
             var totalPages = Math.ceil(totalPdfWidthNeeded / pdfMaxGraphWidth);
@@ -267,40 +305,27 @@
 
             for (let i = 0; i < totalPages; i++) {
                 if (i > 0) doc.addPage();
-
-                doc.setFont("helvetica", "bold");
-                doc.setFontSize(18);
+                doc.setFont("helvetica", "bold"); doc.setFontSize(18);
                 doc.text("PWHT 24-Channel Thermal Log Report", pdfMarginX, 20);
-                
-                doc.setFont("helvetica", "normal");
-                doc.setFontSize(11);
+                doc.setFont("helvetica", "normal"); doc.setFontSize(11);
                 doc.text("Graph Part: " + (i + 1) + " of " + totalPages, pdfMarginX, 28);
                 doc.text("Report Generated: " + new Date().toLocaleString(), pdfMarginX, 34);
 
                 var tempCanvas = document.createElement('canvas');
                 tempCanvas.height = mainCanvas.height;
-                
-                var isLastPage = (i === totalPages - 1);
-                var currentSlicePx = isLastPage ? (mainCanvas.width - (i * slicePixelWidth)) : slicePixelWidth;
-                var currentSliceMm = currentSlicePx * scale;
-                
+                var currentSlicePx = (i === totalPages - 1) ? (mainCanvas.width - (i * slicePixelWidth)) : slicePixelWidth;
                 tempCanvas.width = currentSlicePx;
+                
                 var tCtx = tempCanvas.getContext('2d');
                 tCtx.fillStyle = "#FFFFFF";
                 tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-                tCtx.drawImage(
-                    mainCanvas, 
-                    i * slicePixelWidth, 0, currentSlicePx, mainCanvas.height, 
-                    0, 0, currentSlicePx, mainCanvas.height
-                );
-
-                var sliceDataUrl = tempCanvas.toDataURL('image/png', 1.0);
-                doc.addImage(sliceDataUrl, 'PNG', pdfMarginX, 40, currentSliceMm, pdfGraphHeight);
+                tCtx.drawImage(mainCanvas, i * slicePixelWidth, 0, currentSlicePx, mainCanvas.height, 0, 0, currentSlicePx, mainCanvas.height);
+                
+                doc.addImage(tempCanvas.toDataURL('image/png', 1.0), 'PNG', pdfMarginX, 40, currentSlicePx * scale, pdfGraphHeight);
             }
             
             doc.addPage();
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(14);
+            doc.setFont("helvetica", "bold"); doc.setFontSize(14);
             doc.text("Tabular Data Log", pdfMarginX, 20);
 
             var tableHeaders = ["Date", "Time"];
@@ -309,26 +334,20 @@
             var tableBody = fullCsvData.map(function(row) {
                 var rowData = [row.date, row.time];
                 for (let i = 0; i < numSensors; i++) {
-                    var val = (row.temps[i] !== null && row.temps[i] !== undefined) ? parseFloat(row.temps[i]).toFixed(1) : "--";
-                    rowData.push(val);
+                    rowData.push((row.temps[i] !== null && row.temps[i] !== undefined) ? parseFloat(row.temps[i]).toFixed(1) : "--");
                 }
                 return rowData;
             });
 
             doc.autoTable({
-                startY: 25, 
-                head: [tableHeaders],
-                body: tableBody,
-                theme: 'grid',
+                startY: 25, head: [tableHeaders], body: tableBody, theme: 'grid',
                 headStyles: { fillColor: [52, 58, 64], fontSize: 8, halign: 'center' },
                 bodyStyles: { fontSize: 7, halign: 'center' },
                 margin: { top: 20, right: 14, bottom: 20, left: 14 },
                 didDrawPage: function (data) {
-                    var str = "Page " + doc.internal.getNumberOfPages();
-                    doc.setFontSize(8);
-                    var pageSize = doc.internal.pageSize;
-                    doc.text(str, data.settings.margin.left, pageSize.getHeight() - 10);
-                    doc.text("ESP32-S3 Data Logger", pageSize.getWidth() - 50, pageSize.getHeight() - 10);
+                    var str = "Page " + doc.internal.getNumberOfPages(); doc.setFontSize(8);
+                    doc.text(str, data.settings.margin.left, doc.internal.pageSize.getHeight() - 10);
+                    doc.text("ESP32-S3 Data Logger", doc.internal.pageSize.getWidth() - 50, doc.internal.pageSize.getHeight() - 10);
                 }
             });
 
