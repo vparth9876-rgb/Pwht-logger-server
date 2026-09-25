@@ -1,344 +1,250 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Cloud Data Logger</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <script src="/socket.io/socket.io.js"></script>
-  <style>
-    body { font-family: Arial, sans-serif; text-align: center; margin-top: 20px; background-color: #f4f4f9; }
-    #temp-display { font-size: 50px; font-weight: bold; color: #d9534f; margin: 10px 0; }
-    canvas { border: 2px solid #ccc; border-radius: 8px; width: 95%; max-width: 800px; height: 350px; }
-    .settings-panel { margin: 15px auto; background: #e9ecef; padding: 15px; border-radius: 8px; max-width: 600px; display: inline-block; }
-    .settings-panel label { font-weight: bold; margin: 0 10px; }
-    .settings-panel input { width: 70px; padding: 5px; font-size: 16px; text-align: center; }
-    button { padding: 12px 24px; font-size: 16px; cursor: pointer; color: white; border: none; border-radius: 5px; margin: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-start { background: #007bff; }
-    .btn-start:hover:not(:disabled) { background: #0056b3; }
-    .btn-erase { background: #ff9800; }
-    .btn-erase:hover:not(:disabled) { background: #e68a00; }
-    .btn-img { background: #6c757d; }
-    .btn-img:hover:not(:disabled) { background: #5a6268; }
-    .btn-csv { background: #28a745; }
-    .btn-csv:hover:not(:disabled) { background: #218838; }
-    #status-msg { color: #28a745; font-weight: bold; height: 20px; margin-top: 5px; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>24-Channel PWHT Logger</title>
+    
+    <!-- External Libraries -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f4f4f9; }
+        .controls-bar { margin-bottom: 20px; padding: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        button { padding: 10px 15px; margin-right: 10px; border: none; border-radius: 4px; cursor: pointer; color: white; font-weight: bold; }
+        .btn-start { background: #28a745; }
+        .btn-erase { background: #dc3545; }
+        .btn-pdf { background: #17a2b8; }
+        
+        /* The Scrollbox for the wide graph */
+        .scroll-wrapper {
+            width: 100%;
+            overflow-x: auto; 
+            overflow-y: hidden;
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 8px;
+        }
+        .canvas-container {
+            height: 500px; 
+            width: 100%; 
+            min-width: 1000px; /* Minimum width before scrolling starts */
+        }
+    </style>
 </head>
 <body>
-  <h2>Real-Time Thermal Logging</h2>
-  
-  <div id="temp-display">Awaiting Sensor Connection...</div>
-  <div id="status-msg"></div>
-  
-  <canvas id="graphCanvas" width="800" height="350" style="background-color: #ffffff;"></canvas>
-  
-  <div class="settings-panel">
-    <label>Log Interval (mins): <input type="number" id="timeRes" value="5" min="0.1" step="0.1"></label>
-    <label>Y-Axis Step (&deg;C): <input type="number" id="tempRes" value="3" min="1" step="1"></label>
-  </div>
 
-  <div>
-    <button id="startBtn" class="btn-start" onclick="toggleLogging()">Start Logging</button>
-    <button id="eraseBtn" class="btn-erase" onclick="eraseData()">Erase Data</button>
-    <button class="btn-img" onclick="downloadImage()">Download Graph</button>
-    <button class="btn-csv" onclick="downloadCSV()">Download CSV</button>
-  </div>
-
-  <script>
-    var canvas = document.getElementById('graphCanvas');
-    var ctx = canvas.getContext('2d');
-    var tempHistory = [];
-    var fullCsvData = [];
-    
-    var loggingActive = false;
-    var lastLogTime = 0;
-    
-    // Connect to the Socket.io backend
-    const socket = io();
-
-    function fillWhiteBackground() {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-
-    function drawEmptyGrid() {
-        fillWhiteBackground();
-        var padLeft = 60, padBottom = 70, padTop = 20, padRight = 20;
-        var height = canvas.height - padTop - padBottom;
-        var width = canvas.width - padLeft - padRight;
+    <div class="controls-bar">
+        <button id="loggingBtn" class="btn-start" onclick="toggleLogging()">Start Logging</button>
+        <button class="btn-erase" onclick="eraseData()">Erase Data</button>
         
-        ctx.font = '14px Arial';
-        ctx.textAlign = "left";
-
-        ctx.strokeStyle = '#e0e0e0';
-        ctx.fillStyle = '#999';
-        ctx.beginPath();
-        for (var i = 0; i <= 5; i++) {
-            var y = padTop + (height * i / 5);
-            ctx.moveTo(padLeft, y);
-            ctx.lineTo(canvas.width - padRight, y);
-            ctx.fillText("-- C", 10, y + 5);
-        }
-        ctx.stroke();
-
-        ctx.strokeStyle = '#f0f0f0';
-        ctx.beginPath();
-        for (var i = 0; i <= 10; i++) {
-            var x = padLeft + (width * i / 10);
-            ctx.moveTo(x, padTop);
-            ctx.lineTo(x, canvas.height - padBottom);
-        }
-        ctx.stroke();
+        <label for="resolution" style="margin-left: 10px; font-weight: bold;">Interval: </label>
+        <select id="resolution" onchange="updateInterval()">
+            <option value="1">1 Minute</option>
+            <option value="3" selected>3 Minutes</option>
+            <option value="5">5 Minutes</option>
+            <option value="10">10 Minutes</option>
+        </select>
         
-        ctx.fillStyle = '#666';
-        ctx.textAlign = "center";
-        ctx.fillText("Waiting for Start...", canvas.width/2, canvas.height/2);
-    }
+        <button class="btn-pdf" style="margin-left: 20px;" onclick="downloadPDF()">Download PDF Report</button>
+    </div>
 
-    function drawGraph() {
-        fillWhiteBackground();
-        if (tempHistory.length === 0) return;
+    <div class="scroll-wrapper">
+        <div class="canvas-container" id="chartContainer">
+            <canvas id="graphCanvas"></canvas>
+        </div>
+    </div>
 
-        var padLeft = 60, padBottom = 70, padTop = 20, padRight = 20;
-        var width = canvas.width - padLeft - padRight;
-        var height = canvas.height - padTop - padBottom;
+    <script>
+        // --- Global Variables ---
+        const socket = io();
+        let isLogging = false;
+        let fullCsvData = [];
+        let lastLoggedTimestamp = 0;
+        let loggingIntervalMs = 3 * 60 * 1000; // 3 min default
+        const numSensors = 24;
 
-        var tRes = parseInt(document.getElementById('tempRes').value) || 3;
-        var temps = tempHistory.map(function(d) { return d.temp; });
-        var minRead = Math.min.apply(null, temps);
-        var maxRead = Math.max.apply(null, temps);
+        // --- Chart.js Setup ---
+        const ctx = document.getElementById('graphCanvas').getContext('2d');
+        const chartDatasets = [];
+        const colors = ['#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', '#9A6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#a9a9a9', '#ffffff', '#000000', '#ff0000', '#00ff00'];
 
-        var minGrid = Math.floor((minRead - 1) / tRes) * tRes;
-        var maxGrid = Math.ceil((maxRead + 1) / tRes) * tRes;
-        
-        while ((maxGrid - minGrid) < (tRes * 4)) {
-            minGrid -= tRes;
-            maxGrid += tRes;
+        for (let i = 0; i < numSensors; i++) {
+            chartDatasets.push({
+                label: `TC ${i + 1}`,
+                data: [],
+                borderColor: colors[i],
+                borderWidth: 2,
+                fill: false,
+                tension: 0.1,
+                spanGaps: true // Connect lines if a reading is temporarily null
+            });
         }
-        var steps = Math.round((maxGrid - minGrid) / tRes);
 
-        var maxIndex = tempHistory.length > 1 ? tempHistory.length - 1 : 1;
-        var labelStep = Math.ceil(tempHistory.length / 12);
-
-        ctx.font = '14px Arial';
-        ctx.textAlign = "left";
-
-        ctx.strokeStyle = '#e0e0e0';
-        ctx.fillStyle = '#666';
-        ctx.beginPath();
-        for (var i = 0; i <= steps; i++) {
-            var y = padTop + (height * (steps - i) / steps); 
-            var labelValue = minGrid + (i * tRes);
-            
-            ctx.moveTo(padLeft, y);
-            ctx.lineTo(canvas.width - padRight, y);
-            ctx.fillText(labelValue + " C", 10, y + 5);
-        }
-        ctx.stroke();
-
-        ctx.strokeStyle = '#f0f0f0';
-        ctx.beginPath();
-        for (var i = 0; i < tempHistory.length; i++) {
-            var x = padLeft + (i * (width / maxIndex)); 
-            if (i % labelStep === 0 || i === tempHistory.length - 1) {
-                ctx.moveTo(x, padTop);
-                ctx.lineTo(x, canvas.height - padBottom);
+        const myChart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: [], datasets: chartDatasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                scales: {
+                    y: { title: { display: true, text: 'Temperature (°C)' } },
+                    x: { title: { display: true, text: 'Time' } }
+                }
             }
+        });
+
+        // --- UI Controls ---
+        function toggleLogging() {
+            isLogging = !isLogging;
+            document.getElementById('loggingBtn').innerText = isLogging ? "Pause Logging" : "Start Logging";
+            document.getElementById('loggingBtn').style.background = isLogging ? "#ffc107" : "#28a745";
         }
-        ctx.stroke();
 
-        ctx.strokeStyle = '#d9534f';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        for (var i = 0; i < tempHistory.length; i++) {
-            var x = padLeft + (i * (width / maxIndex)); 
-            var y = canvas.height - padBottom - ((tempHistory[i].temp - minGrid) / (maxGrid - minGrid)) * height;
-            
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-
-            if (i % labelStep === 0 || i === tempHistory.length - 1) {
-                ctx.fillStyle = '#333';
-                ctx.font = '12px Arial';
-                ctx.save();
-                ctx.translate(x, canvas.height - padBottom + 20);
-                ctx.rotate(-Math.PI / 4);
-                ctx.fillText(tempHistory[i].time, 0, 0);
-                ctx.restore();
-            }
+        function updateInterval() {
+            let mins = document.getElementById("resolution").value;
+            loggingIntervalMs = parseInt(mins) * 60 * 1000;
         }
-        ctx.stroke();
-    }
 
-    // Process incoming live data from the server
-    socket.on('new_temperature', function(temp) {
-        var display = document.getElementById('temp-display');
-        display.innerHTML = temp.toFixed(2) + " &deg;C";
-        display.style.color = "#d9534f";
-
-        if (loggingActive) {
-            var nowMs = Date.now();
-            var intervalMs = (parseFloat(document.getElementById('timeRes').value) || 5) * 60000;
-
-            // Only push to the graph if the required time interval has passed
-            if (nowMs - lastLogTime >= intervalMs || tempHistory.length === 0) {
-                lastLogTime = nowMs;
-                
-                var d = new Date();
-                var h = d.getHours();
-                var m = d.getMinutes();
-                var s = d.getSeconds();
-                var timeStr = (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
-                
-                fullCsvData.push({date: d.toLocaleDateString(), time: timeStr, temp: temp});
-                tempHistory.push({temp: temp, time: timeStr});
-                
-                saveSessionData();
-                drawGraph();
-            }
-        }
-    });
-
-    function toggleLogging() {
-        var btn = document.getElementById('startBtn');
-        var eraseBtn = document.getElementById('eraseBtn');
-        var timeInput = document.getElementById('timeRes');
-        var tempInput = document.getElementById('tempRes');
-
-        if (!loggingActive) {
-            loggingActive = true;
-            
-            if (fullCsvData.length === 0 || confirm("Erase previous cycle and start new log?")) {
-                tempHistory = [];
+        function eraseData() {
+            if(confirm("Clear all graph data?")) {
                 fullCsvData = [];
-                lastLogTime = 0;
-                localStorage.removeItem("pwht_log_data");
+                myChart.data.labels = [];
+                myChart.data.datasets.forEach(ds => ds.data = []);
+                myChart.update();
+                document.getElementById('chartContainer').style.width = "100%";
+            }
+        }
+
+        // --- Data Reception & Interval Logic ---
+        socket.on('updateData', function(data) {
+            if (!isLogging) return;
+
+            let currentTime = Date.now();
+            
+            // Check if the selected time interval has passed
+            if (currentTime - lastLoggedTimestamp >= loggingIntervalMs) {
+                
+                let now = new Date();
+                let timeString = now.toLocaleTimeString();
+                let dateString = now.toLocaleDateString();
+
+                // Save to historical array for the PDF table
+                fullCsvData.push({ date: dateString, time: timeString, temps: data.temperatures });
+
+                // Push to Chart.js
+                myChart.data.labels.push(timeString);
+                for (let i = 0; i < numSensors; i++) {
+                    myChart.data.datasets[i].data.push(data.temperatures[i]);
+                }
+
+                // Dynamically expand canvas width if data exceeds screen
+                let requiredWidth = fullCsvData.length * 40; // 40px per data point
+                let container = document.getElementById('chartContainer');
+                if (requiredWidth > container.clientWidth) {
+                    container.style.width = requiredWidth + "px";
+                }
+
+                myChart.update();
+                lastLoggedTimestamp = currentTime;
+            }
+        });
+
+        // --- Multi-Page PDF Generation ---
+        function downloadPDF() {
+            if (fullCsvData.length === 0) {
+                alert("No data available to generate a report.");
+                return;
+            }
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+            const pdfMarginX = 14;
+            const pdfMaxGraphWidth = 269; 
+            const pdfGraphHeight = 115;
+            
+            var mainCanvas = document.getElementById('graphCanvas');
+            var scale = pdfGraphHeight / mainCanvas.height;
+            var totalPdfWidthNeeded = mainCanvas.width * scale;
+            var totalPages = Math.ceil(totalPdfWidthNeeded / pdfMaxGraphWidth);
+            var slicePixelWidth = pdfMaxGraphWidth / scale; 
+
+            // 1. Slice and Draw Graph Pages
+            for (let i = 0; i < totalPages; i++) {
+                if (i > 0) doc.addPage();
+
+                doc.setFont("helvetica", "bold");
+                doc.setFontSize(18);
+                doc.text("PWHT 24-Channel Thermal Log Report", pdfMarginX, 20);
+                
+                doc.setFont("helvetica", "normal");
+                doc.setFontSize(11);
+                doc.text("Graph Part: " + (i + 1) + " of " + totalPages, pdfMarginX, 28);
+                doc.text("Report Generated: " + new Date().toLocaleString(), pdfMarginX, 34);
+
+                var tempCanvas = document.createElement('canvas');
+                tempCanvas.height = mainCanvas.height;
+                
+                var isLastPage = (i === totalPages - 1);
+                var currentSlicePx = isLastPage ? (mainCanvas.width - (i * slicePixelWidth)) : slicePixelWidth;
+                var currentSliceMm = currentSlicePx * scale;
+                
+                tempCanvas.width = currentSlicePx;
+                var tCtx = tempCanvas.getContext('2d');
+                tCtx.fillStyle = "#FFFFFF";
+                tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+                tCtx.drawImage(
+                    mainCanvas, 
+                    i * slicePixelWidth, 0, currentSlicePx, mainCanvas.height, 
+                    0, 0, currentSlicePx, mainCanvas.height
+                );
+
+                var sliceDataUrl = tempCanvas.toDataURL('image/png', 1.0);
+                doc.addImage(sliceDataUrl, 'PNG', pdfMarginX, 40, currentSliceMm, pdfGraphHeight);
             }
             
-            timeInput.disabled = true;
-            tempInput.disabled = true;
-            eraseBtn.disabled = true;
-            
-            btn.innerHTML = "Stop Logging";
-            btn.style.background = "#dc3545"; 
-            document.getElementById('status-msg').innerText = "Logging Active...";
-            
-            saveSessionData();
-        } else {
-            loggingActive = false;
-            timeInput.disabled = false;
-            tempInput.disabled = false;
-            eraseBtn.disabled = false;
-            
-            btn.innerHTML = "Start Logging";
-            btn.style.background = "#007bff"; 
-            document.getElementById('status-msg').innerText = "Logging Stopped.";
-            saveSessionData();
+            // 2. Draw Auto-Paginating Data Table
+            doc.addPage();
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(14);
+            doc.text("Tabular Data Log", pdfMarginX, 20);
+
+            var tableHeaders = ["Date", "Time"];
+            for (let i = 0; i < numSensors; i++) tableHeaders.push("TC " + (i + 1));
+
+            var tableBody = fullCsvData.map(function(row) {
+                var rowData = [row.date, row.time];
+                for (let i = 0; i < numSensors; i++) {
+                    var val = (row.temps[i] !== null && row.temps[i] !== undefined) ? parseFloat(row.temps[i]).toFixed(1) : "--";
+                    rowData.push(val);
+                }
+                return rowData;
+            });
+
+            doc.autoTable({
+                startY: 25, 
+                head: [tableHeaders],
+                body: tableBody,
+                theme: 'grid',
+                headStyles: { fillColor: [52, 58, 64], fontSize: 8, halign: 'center' },
+                bodyStyles: { fontSize: 7, halign: 'center' },
+                margin: { top: 20, right: 14, bottom: 20, left: 14 },
+                didDrawPage: function (data) {
+                    var str = "Page " + doc.internal.getNumberOfPages();
+                    doc.setFontSize(8);
+                    var pageSize = doc.internal.pageSize;
+                    doc.text(str, data.settings.margin.left, pageSize.getHeight() - 10);
+                    doc.text("ESP32-S3 Data Logger", pageSize.getWidth() - 50, pageSize.getHeight() - 10);
+                }
+            });
+
+            doc.save("PWHT_Full_Cycle_Report.pdf");
         }
-    }
-
-    function eraseData() {
-        if (loggingActive) {
-            alert("Please stop logging before erasing data.");
-            return;
-        }
-        if (confirm("Are you sure you want to erase all recorded data?")) {
-            tempHistory = [];
-            fullCsvData = [];
-            lastLogTime = 0;
-            localStorage.removeItem("pwht_log_data");
-            
-            drawEmptyGrid();
-            document.getElementById('status-msg').innerText = "Data erased. Ready for a new cycle.";
-        }
-    }
-
-    function saveSessionData() {
-        var sessionState = {
-            isActive: loggingActive,
-            lastTime: lastLogTime,
-            timeRes: document.getElementById('timeRes').value,
-            tempRes: document.getElementById('tempRes').value,
-            csvData: fullCsvData,
-            historyData: tempHistory
-        };
-        localStorage.setItem("pwht_log_data", JSON.stringify(sessionState));
-    }
-
-    function restoreSessionData() {
-        var savedData = localStorage.getItem("pwht_log_data");
-        if (savedData) {
-            var state = JSON.parse(savedData);
-            fullCsvData = state.csvData || [];
-            tempHistory = state.historyData || [];
-            lastLogTime = state.lastTime || 0;
-            
-            document.getElementById('timeRes').value = state.timeRes;
-            document.getElementById('tempRes').value = state.tempRes;
-
-            if (state.isActive) {
-                document.getElementById('status-msg').innerText = "Session restored from memory.";
-                toggleLogging(); 
-            } else if (fullCsvData.length > 0) {
-                document.getElementById('status-msg').innerText = "Previous stopped session loaded.";
-                drawGraph();
-            } else {
-                drawEmptyGrid();
-            }
-        } else {
-            drawEmptyGrid();
-        }
-    }
-
-    window.onload = restoreSessionData;
-
-    function downloadImage() {
-        if (tempHistory.length === 0) return;
-        var link = document.createElement('a');
-        link.download = 'Cycle_Graph.png';
-        link.href = canvas.toDataURL('image/png');
-        link.click();
-    }
-
-    function downloadCSV() {
-        if (fullCsvData.length === 0) return;
-        var csv = "Date,Time,Temperature (C)\n";
-        for (var i = 0; i < fullCsvData.length; i++) {
-            csv += fullCsvData[i].date + "," + fullCsvData[i].time + "," + fullCsvData[i].temp + "\n";
-        }
-        var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        var link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = "Cycle_Log.csv";
-        link.style.display = "none";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    }
-  </script>
+    </script>
 </body>
 </html>
-<script src="/socket.io/socket.io.js"></script>
-<!-- jsPDF and AutoTable for Reports -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
-
-<style>
-  .scroll-wrapper {
-      width: 100%;
-      overflow-x: auto; 
-      overflow-y: hidden;
-      border: 1px solid #ccc;
-      background: #f8f9fa;
-      margin-top: 20px;
-  }
-  .canvas-container {
-      height: 400px; 
-      width: 100%; 
-      min-width: 800px; 
-  }
-  .controls-bar {
-      margin-top: 15px;
-      margin-bottom: 15px;
-  }
-</style>
